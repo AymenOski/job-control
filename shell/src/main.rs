@@ -12,6 +12,7 @@ use cmd::Command;
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 use std::env::*;
+use std::ffi::CString;
 use std::io::*;
 // use std::fs;
 // use std::io;
@@ -43,7 +44,23 @@ fn main() {
 
         rl.add_history_entry(input).unwrap();
 
-        let parts: Vec<&str> = input.split_whitespace().collect();
+        let mut parts: Vec<&str> = input.split_whitespace().collect();
+        
+        // Detect background flag '&'
+        let mut is_background = false;
+        if let Some(&last) = parts.last() {
+            if last == "&" {
+                is_background = true;
+                parts.pop();
+            } else if last.ends_with('&') {
+                is_background = true;
+                let last_idx = parts.len() - 1;
+                parts[last_idx] = &parts[last_idx][..parts[last_idx].len()-1];
+            }
+        }
+
+        if parts.is_empty() { continue; }
+
         let cmd = parts[0].trim_matches(|c| c == '"');
         let args: Vec<String> = parts[1..].iter().map(|c| c.to_string()).collect();
 
@@ -118,9 +135,42 @@ fn main() {
                 
             "help" => print_help(),
             
-            _ => println!("Command '{}' not found", cmd),
-            
+            _ => {
+                
+                let c_cmd = CString::new(cmd).unwrap();
+                let c_args: Vec<CString> = parts.iter()
+                    .map(|&s| CString::new(s).unwrap())
+                    .collect();
+                
+                let mut arg_ptrs: Vec<*const libc::c_char> = c_args.iter()
+                    .map(|s| s.as_ptr())
+                    .collect();
+                arg_ptrs.push(std::ptr::null());
 
+                unsafe {
+                    let pid = libc::fork();
+                    if pid == 0 {
+                        libc::execvp(c_cmd.as_ptr(), arg_ptrs.as_ptr());
+                        eprintln!("{}: command not found", cmd);
+                        libc::_exit(1);
+                    } else if pid > 0 {
+                        if is_background {
+                            println!("[launched] {}", pid);
+                        } else {
+                            let mut status = 0;
+                            libc::waitpid(pid, &mut status, 0);
+                        }
+                    } else {
+                        eprintln!("fork failed");
+                    }
+                }
+            }
+        }
+
+        // Cleanup finished background processes (reaping zombies)
+        unsafe {
+            let mut status = 0;
+            while libc::waitpid(-1, &mut status, libc::WNOHANG) > 0 {}
         }
     }
 }
