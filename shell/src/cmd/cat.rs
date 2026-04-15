@@ -24,7 +24,7 @@ impl Cat {
             loop {
                 match rl.readline("") {
                     Ok(line) => println!("{}", line),
-                    Err(ReadlineError::Interrupted) => continue, 
+                    Err(ReadlineError::Interrupted) => break, 
                     Err(ReadlineError::Eof) => break,
                     Err(_) => {
                         return Err(ShellError::Other(
