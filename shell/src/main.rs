@@ -20,7 +20,7 @@ use std::io::*;
 enum JobStatus {
     Running,
     Stopped,
-    // we need to add more states like suspended and terminated (ctr +z && ctr +c)
+    // we need to add more states like suspended and terminated (ctr +z && ctr +c) 
 }
 
 #[derive(Clone, Debug)]
