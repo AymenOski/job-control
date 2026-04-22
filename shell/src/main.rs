@@ -14,12 +14,34 @@ use rustyline::DefaultEditor;
 use std::env::*;
 use std::ffi::CString;
 use std::io::*;
-// use std::fs;
-// use std::io;
+
+
+#[derive(Clone, Debug, PartialEq)]
+enum JobStatus {
+    Running,
+    Stopped,
+    // we need to add more states like suspended and terminated (ctr +z && ctr +c)
+}
+
+#[derive(Clone, Debug)]
+struct Job {
+    id: usize,
+    pid: i32,
+    command: String,
+    status: JobStatus, // Exited || Crashed || Stopped by Ctrl+Z
+}
 
 fn main() {
+    // ignore signals
+    unsafe {
+        libc::signal(libc::SIGINT, libc::SIG_IGN);
+        libc::signal(libc::SIGTSTP, libc::SIG_IGN);
+    }
+
     let mut rl = DefaultEditor::new().unwrap();
     let mut last_dir = current_dir().unwrap_or_else(|_| dirs::home_dir().unwrap());
+    let mut jobs: Vec<Job> = Vec::new();
+    let mut job_id = 1;
 
     loop {
         // safe current directory for prompt
@@ -135,6 +157,16 @@ fn main() {
                 
             "help" => print_help(),
             
+            "jobs" => {
+                for job in &jobs {
+                    let status_str = match job.status {
+                        JobStatus::Running => "Running",
+                        JobStatus::Stopped => "Stopped",
+                    };
+                    println!("[{}]  {}                 {}", job.id, status_str, job.command);
+                }
+            }
+            
             _ => {
                 
                 let c_cmd = CString::new(cmd).unwrap();
@@ -155,10 +187,18 @@ fn main() {
                         libc::_exit(1);
                     } else if pid > 0 {
                         if is_background {
-                            println!("[launched] {}", pid);
+                            let job = Job {
+                                id: job_id,
+                                pid,
+                                command: input.to_string(),
+                                status: JobStatus::Running,
+                            };
+                            println!("[{}] {}", job.id, job.pid);
+                            jobs.push(job);
+                            job_id += 1;
                         } else {
                             let mut status = 0;
-                            libc::waitpid(pid, &mut status, 0);
+                            libc::waitpid(pid, &mut status, 0); // 0 mean wait for the child process to finish
                         }
                     } else {
                         eprintln!("fork failed");
@@ -170,7 +210,14 @@ fn main() {
         // Cleanup finished background processes (reaping zombies)
         unsafe {
             let mut status = 0;
-            while libc::waitpid(-1, &mut status, libc::WNOHANG) > 0 {}
+            loop {
+                let reaped_pid = libc::waitpid(-1, &mut status, libc::WNOHANG); // dont wait for the child process to finish
+                if reaped_pid <= 0 { break; }
+                
+                if let Some(pos) = jobs.iter().position(|j| j.pid == reaped_pid) {
+                    jobs.remove(pos);
+                }
+            }
         }
     }
 }
