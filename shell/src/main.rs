@@ -167,12 +167,34 @@ fn main() {
             "help" => print_help(),
             
             "jobs" => {
-                for job in &jobs {
-                    let status_str = match job.status {
-                        JobStatus::Running => "Running",
-                        JobStatus::Stopped => "Stopped",
-                    };
-                    println!("[{}]  {}       {}", job.id, status_str, job.command);
+                let p_flag = args.contains(&"-p".to_string()); // pid only
+                let l_flag = args.contains(&"-l".to_string()); // long format
+                let r_flag = args.contains(&"-r".to_string()); // running only
+                let s_flag = args.contains(&"-s".to_string()); // stopped only
+
+                let jobs_len = jobs.len();
+                for (index, job) in jobs.iter().enumerate() {
+                    if r_flag && job.status != JobStatus::Running {
+                        continue;
+                    }
+                    if s_flag && job.status != JobStatus::Stopped {
+                        continue;
+                    }
+
+                    if p_flag {
+                        println!("{}", job.pid);
+                    } else {
+                        let status = match job.status {
+                            JobStatus::Running => "Running",
+                            JobStatus::Stopped => "Stopped",
+                        };
+                        
+                        let indicator = if jobs_len > 0 && index == jobs_len - 1 { "+"
+                        } else if jobs_len > 1 && index == jobs_len - 2 { "-" } else { " " };
+
+                        if l_flag { println!("[{}]{} {} {}                 {}", job.id, indicator, job.pid, status, job.command);
+                        } else { println!("[{}]{}  {}                 {}", job.id, indicator, status, job.command); }
+                    }
                 }
             }
             
