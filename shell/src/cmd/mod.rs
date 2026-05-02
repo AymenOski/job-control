@@ -5,6 +5,7 @@ pub mod cp;
 pub mod ls;
 pub mod cat;
 pub mod help;
+pub mod kill;
 
 
 pub trait Command {

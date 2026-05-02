@@ -14,9 +14,11 @@ use rustyline::DefaultEditor;
 use std::env::*;
 use std::ffi::CString;
 use std::io::*;
+use crate::cmd::kill::Kill;
 
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq,Eq)]
+#[allow(dead_code)]
 enum JobStatus {
     Running,
     Stopped,
@@ -121,6 +123,13 @@ fn main() {
                 }
             }
 
+            "kill" => {
+                if let Err(e) = Kill::new(args.clone()).execute() {
+                    eprintln!("{:?}", e);
+                }
+            }
+
+
             "cp" => {
                 if let Err(e) = Cp::new(args.clone()).execute() {
                     eprintln!("{}", e);
@@ -163,7 +172,7 @@ fn main() {
                         JobStatus::Running => "Running",
                         JobStatus::Stopped => "Stopped",
                     };
-                    println!("[{}]  {}                 {}", job.id, status_str, job.command);
+                    println!("[{}]  {}       {}", job.id, status_str, job.command);
                 }
             }
             

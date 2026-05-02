@@ -25,17 +25,17 @@ Implement process launching, process groups, terminal control, and background/fo
 
 ### Phase 2 — Background Launch (`&`)
 
-* Detect background operator in parser
-* `fork()` child
+* Detect background operator in parser — done ✅
+* `fork()` child — done ✅
 * `setpgid(0, 0)` in child
 * Parent stores PGID in job table
 * Print `[job_id] pid`
 
 ### Phase 3 — Foreground Launch
 
-* Launch normal foreground process
+* Launch normal foreground process — done ✅
 * Transfer terminal with `tcsetpgrp()`
-* Wait for foreground completion/stop
+* Wait for foreground completion/stop — done ✅
 * Restore terminal to shell afterward
 
 ### Phase 4 — Ctrl+C / Ctrl+Z Compatibility
