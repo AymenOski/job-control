@@ -33,12 +33,17 @@ struct Job {
 }
 
 fn main() {
-    // Step 1: Shell ignores these signals so it doesn't die
     unsafe {
-        libc::signal(libc::SIGINT, libc::SIG_IGN);   // Ignore Ctrl+C
-        libc::signal(libc::SIGTSTP, libc::SIG_IGN);  // Ignore Ctrl+Z
+        // Shell puts itself in its own process group
+        libc::setpgid(0, 0); // pid=0 means self, pgid=0 means use pid as pgid
+
+        // Shell ignores these signals so it doesn't die
+        libc::signal(libc::SIGINT, libc::SIG_IGN); // Ignore Ctrl+C
+        libc::signal(libc::SIGTSTP, libc::SIG_IGN); // Ignore Ctrl+Z
+        libc::signal(libc::SIGTTOU, libc::SIG_IGN);
+        libc::signal(libc::SIGTTIN, libc::SIG_IGN);
     }
-    
+
     let mut rl = DefaultEditor::new().unwrap();
     let mut last_dir = current_dir().unwrap_or_else(|_| dirs::home_dir().unwrap());
     let mut jobs: Vec<Job> = Vec::new();
@@ -267,19 +272,19 @@ fn main() {
 
                     if pid == 0 {
                         // Child: create its own process group
-                        libc::setpgid(0, 0);  // pid=0 means self, pgid=0 means use pid as pgid
-                        
+                        libc::setpgid(0, 0); // pid=0 means self, pgid=0 means use pid as pgid
+
                         // Restore default signal behavior so it CAN be interrupted
                         libc::signal(libc::SIGINT, libc::SIG_DFL);
                         libc::signal(libc::SIGTSTP, libc::SIG_DFL);
-                        
+
                         // Execute command
                         libc::execvp(c_cmd.as_ptr(), arg_ptrs.as_ptr());
                         eprintln!("{}: command not found", cmd);
                         libc::_exit(1);
                     } else if pid > 0 {
                         libc::setpgid(pid, pid);
-                        
+
                         if is_background {
                             // Background: add to jobs, continue shell
                             let job = Job {
@@ -292,9 +297,31 @@ fn main() {
                             jobs.push(job);
                             job_id += 1;
                         } else {
-                            // Foreground: wait for child to exit
+                            // Foreground: give terminal to child, wait, take it back
+
+                            // Give terminal to child's process group
+                            libc::tcsetpgrp(libc::STDIN_FILENO, pid);
+
+                            // Wait for child (WUNTRACED so we know if it stops)
                             let mut status = 0;
-                            libc::waitpid(pid, &mut status, 0); // 0 mean wait for the child process to finish
+                            libc::waitpid(pid, &mut status, libc::WUNTRACED);
+
+                            let shell_pgid = libc::getpgrp();
+
+                            libc::tcsetpgrp(libc::STDIN_FILENO, shell_pgid);
+                            // Check if child was stopped
+                            if libc::WIFSTOPPED(status) {
+                                // if Child was stoped by Ctrl+Z add to jobs table
+                                let job = Job {
+                                    id: job_id,
+                                    pid,
+                                    command: input.to_string(),
+                                    status: JobStatus::Stopped,
+                                };
+                                println!("\n[{}]+ Stopped             {}", job.id, job.command);
+                                jobs.push(job);
+                                job_id += 1;
+                            }
                         }
                     } else {
                         eprintln!("fork failed");
