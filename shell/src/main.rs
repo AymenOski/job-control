@@ -234,7 +234,7 @@ fn main() {
 
                         if l_flag {
                             println!(
-                                "[{}]{} {} {}                 {}",
+                                "[{}]{}  {} {:<20}{}",
                                 job.id,
                                 indicator,
                                 job.pid,
@@ -243,7 +243,7 @@ fn main() {
                             );
                         } else {
                             println!(
-                                "[{}]{}  {}                 {}",
+                                "[{}]{}  {:<22}{}",
                                 job.id,
                                 indicator,
                                 status,
@@ -259,63 +259,89 @@ fn main() {
                 let job_index = if args.is_empty() {
                     // No args: use current job (last in table)
                     if jobs.is_empty() {
-                        println!("fg: no current job");
+                        println!("bash: fg: current: no such job");
                         continue;
                     }
                     jobs.len() - 1
                 } else {
-                    // Parse argument: could be "%1" or "1234"
+                    // Parse argument: must be in format "%1"
                     let arg = &args[0];
-                    
+
+                    if !arg.starts_with('%') {
+                        println!("bash: fg: {}: no such job", arg);
+                        continue;
+                    }
+
                     let mut found: Option<usize> = None;
-                    
-                    if arg.starts_with('%') {
-                        // Parse job id like "%1"
-                        match arg[1..].parse::<usize>() {
-                            Ok(id) => {
-                                // Find job by id
-                                for (i, job) in jobs.iter().enumerate() {
-                                    if job.id == id {
-                                        found = Some(i);
-                                        break;
-                                    }
+
+                    // Parse job id like "%1"
+                    match arg[1..].parse::<usize>() {
+                        Ok(id) => {
+                            // Find job by id
+                            for (i, job) in jobs.iter().enumerate() {
+                                if job.id == id {
+                                    found = Some(i);
+                                    break;
                                 }
-                            }
-                            Err(_) => {
-                                println!("fg: bad job spec '{}'", arg);
-                                continue;
                             }
                         }
-                    } else {
-                        // Try parsing as PID
-                        match arg.parse::<i32>() {
-                            Ok(pid) => {
-                                // Find job by pid
-                                for (i, job) in jobs.iter().enumerate() {
-                                    if job.pid == pid {
-                                        found = Some(i);
-                                        break;
-                                    }
-                                }
-                            }
-                            Err(_) => {
-                                println!("fg: bad argument '{}'", arg);
-                                continue;
-                            }
+                        Err(_) => {
+                            println!("bash: fg: {}: no such job", arg);
+                            continue;
                         }
                     }
-                    
+
                     match found {
                         Some(idx) => idx,
                         None => {
-                            println!("fg: job not found");
+                            println!("bash: fg: {}: no such job", arg);
                             continue;
                         }
                     }
                 };
-                
-                // we should now run the job in foreground after we have found the job index
-                // todo
+
+                // Runing the job in foreground after we have found the job index
+                let pid = jobs[job_index].pid;
+                let command = jobs[job_index].command.clone();
+
+                // Print the command
+                println!("{}", command);
+
+                // Transfer terminal to job's process group
+                unsafe {
+                    libc::tcsetpgrp(libc::STDIN_FILENO, pid);
+                }
+
+                // Wait for job to finish or stop (WUNTRACED catches Ctrl+Z)
+                let mut status = 0;
+                unsafe {
+                    libc::waitpid(pid, &mut status, libc::WUNTRACED);
+                }
+
+                // Get terminal back
+                let shell_pgid = unsafe { libc::getpgrp() };
+                unsafe {
+                    libc::tcsetpgrp(libc::STDIN_FILENO, shell_pgid);
+                }
+
+                // Check what happened to the job
+                if libc::WIFEXITED(status) {
+                    // Job exited normally
+                    jobs.remove(job_index);
+                } else if libc::WIFSTOPPED(status) {
+                    // Job was stopped (Ctrl+Z)
+                    jobs[job_index].status = JobStatus::Stopped;
+                    println!(
+                        "\n[{}]+  {:<25}{}",
+                        jobs[job_index].id,
+                        "Stopped",
+                        jobs[job_index].command
+                    );
+                } else if libc::WIFSIGNALED(status) {
+                    // Job was killed by signal
+                    let _sig = libc::WTERMSIG(status);
+                    jobs.remove(job_index);
+                }
             }
 
             _ => {
@@ -373,16 +399,19 @@ fn main() {
                             let shell_pgid = libc::getpgrp();
 
                             libc::tcsetpgrp(libc::STDIN_FILENO, shell_pgid);
-                            // Check if child was stopped
-                            if libc::WIFSTOPPED(status) {
-                                // if Child was stoped by Ctrl+Z add to jobs table
+
+                            // Check what happened to the child process
+                            if libc::WIFEXITED(status) {
+                                // Child exited normally - just continue
+                            } else if libc::WIFSTOPPED(status) {
+                                // Child was stopped by Ctrl+Z - add to jobs table
                                 let job = Job {
                                     id: job_id,
                                     pid,
                                     command: input.to_string(),
                                     status: JobStatus::Stopped,
                                 };
-                                println!("\n[{}]+ Stopped             {}", job.id, job.command);
+                                println!("\n[{}]+  {:<25}{}", job.id, "Stopped", job.command);
                                 jobs.push(job);
                                 job_id += 1;
                             }
