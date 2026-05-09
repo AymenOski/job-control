@@ -254,6 +254,70 @@ fn main() {
                 }
             }
 
+            "fg" => {
+                // Find the job to bring to foreground
+                let job_index = if args.is_empty() {
+                    // No args: use current job (last in table)
+                    if jobs.is_empty() {
+                        println!("fg: no current job");
+                        continue;
+                    }
+                    jobs.len() - 1
+                } else {
+                    // Parse argument: could be "%1" or "1234"
+                    let arg = &args[0];
+                    
+                    let mut found: Option<usize> = None;
+                    
+                    if arg.starts_with('%') {
+                        // Parse job id like "%1"
+                        match arg[1..].parse::<usize>() {
+                            Ok(id) => {
+                                // Find job by id
+                                for (i, job) in jobs.iter().enumerate() {
+                                    if job.id == id {
+                                        found = Some(i);
+                                        break;
+                                    }
+                                }
+                            }
+                            Err(_) => {
+                                println!("fg: bad job spec '{}'", arg);
+                                continue;
+                            }
+                        }
+                    } else {
+                        // Try parsing as PID
+                        match arg.parse::<i32>() {
+                            Ok(pid) => {
+                                // Find job by pid
+                                for (i, job) in jobs.iter().enumerate() {
+                                    if job.pid == pid {
+                                        found = Some(i);
+                                        break;
+                                    }
+                                }
+                            }
+                            Err(_) => {
+                                println!("fg: bad argument '{}'", arg);
+                                continue;
+                            }
+                        }
+                    }
+                    
+                    match found {
+                        Some(idx) => idx,
+                        None => {
+                            println!("fg: job not found");
+                            continue;
+                        }
+                    }
+                };
+                
+                // we should now run the job in foreground after we have found the job index
+                // todo
+            }
+
             _ => {
                 let c_cmd = CString::new(cmd).unwrap();
                 let c_args: Vec<CString> = parts
