@@ -1,6 +1,7 @@
+
+
 mod cmd;
 mod error;
-
 use cmd::cp::Cp;
 use cmd::cat::Cat;
 use cmd::mkdir::Mkdir;
@@ -155,7 +156,7 @@ fn main() {
             }
 
             "kill" => {
-                if let Err(e) = Kill::new(args.clone()).execute() {
+                if let Err(e) = Kill::new(args.clone(), &mut jobs).execute() {
                     eprintln!("{:?}", e);
                 }
             }
@@ -311,11 +312,13 @@ fn main() {
                 unsafe {
                     libc::tcsetpgrp(libc::STDIN_FILENO, pid);
                 }
-
+                
                 // Wait for job to finish or stop (WUNTRACED catches Ctrl+Z)
                 let mut status = 0;
                 unsafe {
+                     libc::kill(-pid, libc::SIGCONT);
                     libc::waitpid(pid, &mut status, libc::WUNTRACED);
+                    
                 }
 
                 // Get terminal back
@@ -342,8 +345,28 @@ fn main() {
                     let _sig = libc::WTERMSIG(status);
                     jobs.remove(job_index);
                 }
-            }
+            },
 
+            "bg" => {
+                
+                //find the most recently stopped job (iterate in reverse to get last stopped)
+               if let Some(job) = jobs.iter_mut().rev().find(|j| j.status == JobStatus::Stopped) {
+                unsafe {
+                    // send <SIGCONT> to the entire process group (-job.pid means all processes in that group)
+                    // this tells the kernel to resume the stopped process from where it was paused
+                    libc::kill(-job.pid, libc::SIGCONT);
+                }
+                    // Update job status in our jobs table from Stopped => Running
+                    // Shell does NOT call waitpid() here => process runs freely in background
+                job.status = JobStatus::Running;
+                println!(
+                    "[{}]+ {}", 
+                    job.id,
+                    job.command
+                );
+
+               }
+            },
             _ => {
                 let c_cmd = CString::new(cmd).unwrap();
                 let c_args: Vec<CString> = parts
@@ -376,6 +399,7 @@ fn main() {
                         libc::setpgid(pid, pid);
 
                         if is_background {
+                            job_id = (1..).find(|id| !jobs.iter().any(|j| j.id == *id)).unwrap();
                             // Background: add to jobs, continue shell
                             let job = Job {
                                 id: job_id,
@@ -385,7 +409,7 @@ fn main() {
                             };
                             println!("[{}] {}", job.id, job.pid);
                             jobs.push(job);
-                            job_id += 1;
+                            job_id = (1..).find(|id| !jobs.iter().any(|j| j.id == *id)).unwrap();
                         } else {
                             // Foreground: give terminal to child, wait, take it back
 
@@ -412,8 +436,9 @@ fn main() {
                                     status: JobStatus::Stopped,
                                 };
                                 println!("\n[{}]+  {:<25}{}", job.id, "Stopped", job.command);
+                                job_id = (1..).find(|id| !jobs.iter().any(|j| j.id == *id)).unwrap();
                                 jobs.push(job);
-                                job_id += 1;
+
                             }
                         }
                     } else {
