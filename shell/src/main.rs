@@ -33,16 +33,22 @@ struct Job {
     status: JobStatus, // Exited || Crashed || Stopped by Ctrl+Z
 }
 
-fn main() {
+    fn main() {
     unsafe {
         // Shell puts itself in its own process group
-        libc::setpgid(0, 0); // pid=0 means self, pgid=0 means use pid as pgid
+        // libc::setpgid(0, 0); // pid=0 means self, pgid=0 means use pid as pgid
 
         // Shell ignores these signals so it doesn't die
         libc::signal(libc::SIGINT, libc::SIG_IGN); // Ignore Ctrl+C
         libc::signal(libc::SIGTSTP, libc::SIG_IGN); // Ignore Ctrl+Z
         libc::signal(libc::SIGTTOU, libc::SIG_IGN);
         libc::signal(libc::SIGTTIN, libc::SIG_IGN);
+
+        if libc::isatty(libc::STDIN_FILENO) != 0 {
+        let shell_pid = libc::getpid();
+        libc::setpgid(shell_pid, shell_pid);
+        libc::tcsetpgrp(libc::STDIN_FILENO, shell_pid);
+        }
     }
 
     let mut rl = DefaultEditor::new().unwrap();
