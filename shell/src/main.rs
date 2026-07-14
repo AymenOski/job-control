@@ -167,6 +167,66 @@ struct Job {
                 }
             }
 
+            "bg" => {
+                let target_job = if args.is_empty() {
+                    jobs.last().cloned()
+                } else {
+                    let spec = &args[0];
+                    let job_opt = if spec.starts_with('%') {
+                        let id_str = &spec[1..];
+                        if id_str.is_empty() || id_str == "+" || id_str == "%" {
+                            jobs.last().cloned()
+                        } else if id_str == "-" {
+                            if jobs.len() > 1 {
+                                Some(jobs[jobs.len() - 2].clone())
+                            } else {
+                                None
+                            }
+                        } else {
+                            match id_str.parse::<usize>() {
+                                Ok(id) => jobs.iter().find(|j| j.id == id).cloned(),
+                                Err(_) => None,
+                            }
+                        }
+                    } else {
+                        match spec.parse::<usize>() {
+                            Ok(id) => jobs.iter().find(|j| j.id == id).cloned(),
+                            Err(_) => None,
+                        }
+                    };
+                    job_opt
+                };
+
+                if let Some(job) = target_job {
+                    // Update status in the jobs list to Running
+                    if let Some(pos) = jobs.iter().position(|j| j.pid == job.pid) {
+                        jobs[pos].status = JobStatus::Running;
+                        
+                        let jobs_len = jobs.len();
+                        let indicator = if jobs_len > 0 && pos == jobs_len - 1 {
+                            "+"
+                        } else if jobs_len > 1 && pos == jobs_len - 2 {
+                            "-"
+                        } else {
+                            " "
+                        };
+
+                        println!("[{}]{} continued           {}", job.id, indicator, job.command);
+
+                        unsafe {
+                            // Send SIGCONT to the process group of the job to resume it
+                            libc::kill(-job.pid, libc::SIGCONT);
+                        }
+                    }
+                } else {
+                    if args.is_empty() {
+                        eprintln!("bg: current: no such job");
+                    } else {
+                        eprintln!("bg: {}: no such job", args[0]);
+                    }
+                }
+            }
+
             "cp" => {
                 if let Err(e) = Cp::new(args.clone()).execute() {
                     eprintln!("{}", e);
