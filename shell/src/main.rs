@@ -54,7 +54,6 @@ struct Job {
     let mut rl = DefaultEditor::new().unwrap();
     let mut last_dir = current_dir().unwrap_or_else(|_| dirs::home_dir().unwrap());
     let mut jobs: Vec<Job> = Vec::new();
-    let mut job_id = 1;
 
     loop {
         // safe current directory for prompt
@@ -444,17 +443,16 @@ struct Job {
                         libc::setpgid(pid, pid);
 
                         if is_background {
-                            job_id = (1..).find(|id| !jobs.iter().any(|j| j.id == *id)).unwrap();
+                            let fresh_id = (1..).find(|id| !jobs.iter().any(|j| j.id == *id)).unwrap();
                             // Background: add to jobs, continue shell
                             let job = Job {
-                                id: job_id,
+                                id: fresh_id,
                                 pid,
                                 command: input.to_string(),
                                 status: JobStatus::Running,
                             };
                             println!("[{}] {}", job.id, job.pid);
                             jobs.push(job);
-                            job_id = (1..).find(|id| !jobs.iter().any(|j| j.id == *id)).unwrap();
                         } else {
                             // Foreground: give terminal to child, wait, take it back
 
@@ -472,18 +470,19 @@ struct Job {
                             // Check what happened to the child process
                             if libc::WIFEXITED(status) {
                                 // Child exited normally - just continue
+                                
                             } else if libc::WIFSTOPPED(status) {
                                 // Child was stopped by Ctrl+Z - add to jobs table
+
+                                let fresh_id = (1..).find(|id| !jobs.iter().any(|j| j.id == *id)).unwrap();
                                 let job = Job {
-                                    id: job_id,
+                                    id: fresh_id,
                                     pid,
                                     command: input.to_string(),
                                     status: JobStatus::Stopped,
                                 };
                                 println!("\n[{}]+  {:<25}{}", job.id, "Stopped", job.command);
-                                job_id = (1..).find(|id| !jobs.iter().any(|j| j.id == *id)).unwrap();
                                 jobs.push(job);
-
                             }
                         }
                     } else {
