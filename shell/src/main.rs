@@ -412,27 +412,6 @@ struct Job {
                     jobs.remove(job_index);
                 }
             },
-
-            "bg" => {
-                
-                //find the most recently stopped job (iterate in reverse to get last stopped)
-               if let Some(job) = jobs.iter_mut().rev().find(|j| j.status == JobStatus::Stopped) {
-                unsafe {
-                    // send <SIGCONT> to the entire process group (-job.pid means all processes in that group)
-                    // this tells the kernel to resume the stopped process from where it was paused
-                    libc::kill(-job.pid, libc::SIGCONT);
-                }
-                    // Update job status in our jobs table from Stopped => Running
-                    // Shell does NOT call waitpid() here => process runs freely in background
-                job.status = JobStatus::Running;
-                println!(
-                    "[{}]+ {}", 
-                    job.id,
-                    job.command
-                );
-
-               }
-            },
             _ => {
                 let c_cmd = CString::new(cmd).unwrap();
                 let c_args: Vec<CString> = parts
