@@ -17,6 +17,8 @@ use std::ffi::CString;
 use std::io::*;
 use crate::cmd::kill::Kill;
 use crate::cmd::jobs::Jobs;
+use crate::cmd::bg::Bg;
+use crate::cmd::fg::Fg;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[allow(dead_code)]
@@ -167,68 +169,6 @@ struct Job {
                 }
             }
 
-            "bg" => {
-                let target_job = if args.is_empty() {
-                    jobs.last().cloned()
-                } else {
-                    let spec = &args[0];
-                    let job_opt = if spec.starts_with('%') {
-                        let id_str = &spec[1..];
-                        if id_str.is_empty() || id_str == "+" || id_str == "%" {
-                            jobs.last().cloned()
-                        } else if id_str == "-" {
-                            if jobs.len() > 1 {
-                                Some(jobs[jobs.len() - 2].clone())
-                            } else {
-                                None
-                            }
-                        } else {
-                            match id_str.parse::<usize>() {
-                                Ok(id) => jobs.iter().find(|j| j.id == id).cloned(),
-                                Err(_) => None,
-                            }
-                        }
-                    } else {
-                        match spec.parse::<usize>() {
-                            Ok(id) => jobs.iter().find(|j| j.id == id).cloned(),
-                            Err(_) => None,
-                        }
-                    };
-                    job_opt
-                };
-
-                if let Some(job) = target_job {
-                    // Update status in the jobs list to Running
-                    if let Some(pos) = jobs.iter().position(|j| j.pid == job.pid) {
-                        jobs[pos].status = JobStatus::Running;
-                        
-                        let jobs_len = jobs.len();
-                        let indicator = if jobs_len > 0 && pos == jobs_len - 1 {
-                            "+"
-                        } else if jobs_len > 1 && pos == jobs_len - 2 {
-                            "-"
-                        } else {
-                            " "
-                        };
-
-                        // println!("[{}]{} continued           {}", job.id, indicator, job.command);
-                        println!("[{}]{}  {:<25}{}", job.id, indicator, "Continued", job.command);
-
-
-                        unsafe {
-                            // Send SIGCONT to the process group of the job to resume it
-                            libc::kill(-job.pid, libc::SIGCONT);
-                        }
-                    }
-                } else {
-                    if args.is_empty() {
-                        eprintln!("bg: current: no such job");
-                    } else {
-                        eprintln!("bg: {}: no such job", args[0]);
-                    }
-                }
-            }
-
             "cp" => {
                 if let Err(e) = Cp::new(args.clone()).execute() {
                     eprintln!("{}", e);
@@ -277,96 +217,17 @@ struct Job {
             }
 
             "fg" => {
-                // Find the job to bring to foreground
-                let job_index = if args.is_empty() {
-                    // No args: use current job (last in table)
-                    if jobs.is_empty() {
-                        println!("bash: fg: current: no such job");
-                        continue;
-                    }
-                    jobs.len() - 1
-                } else {
-                    // Parse argument: must be in format "%1"
-                    let arg = &args[0];
-
-                    if !arg.starts_with('%') {
-                        println!("bash: fg: {}: no such job", arg);
-                        continue;
-                    }
-
-                    let mut found: Option<usize> = None;
-
-                    // Parse job id like "%1"
-                    match arg[1..].parse::<usize>() {
-                        Ok(id) => {
-                            // Find job by id
-                            for (i, job) in jobs.iter().enumerate() {
-                                if job.id == id {
-                                    found = Some(i);
-                                    break;
-                                }
-                            }
-                        }
-                        Err(_) => {
-                            println!("bash: fg: {}: no such job", arg);
-                            continue;
-                        }
-                    }
-
-                    match found {
-                        Some(idx) => idx,
-                        None => {
-                            println!("bash: fg: {}: no such job", arg);
-                            continue;
-                        }
-                    }
-                };
-
-                // Runing the job in foreground after we have found the job index
-                let pid = jobs[job_index].pid;
-                let command = jobs[job_index].command.clone();
-
-                // Print the command
-                println!("{}", command);
-
-                // Transfer terminal to job's process group
-                unsafe {
-                    libc::tcsetpgrp(libc::STDIN_FILENO, pid);
+                if let Err(e) = Fg::new(args.clone(), &mut jobs).execute() {
+                    eprintln!("{:?}", e);
                 }
-                
-                // Wait for job to finish or stop (WUNTRACED catches Ctrl+Z)
-                let mut status = 0;
-                unsafe {
-                     libc::kill(-pid, libc::SIGCONT);
-                    libc::waitpid(pid, &mut status, libc::WUNTRACED);
-                    
-                }
+            }
 
-                // Get terminal back
-                let shell_pgid = unsafe { libc::getpgrp() };
-                unsafe {
-                    libc::tcsetpgrp(libc::STDIN_FILENO, shell_pgid);
+            "bg" => {
+                if let Err(e) = Bg::new(args.clone(), &mut jobs).execute() {
+                    eprintln!("{:?}", e);
                 }
-
-                // Check what happened to the job
-                if libc::WIFEXITED(status) {
-                    // Job exited normally
-                    jobs.remove(job_index);
-                } else if libc::WIFSTOPPED(status) {
-                    // Job was stopped (Ctrl+Z)
-                    jobs[job_index].status = JobStatus::Stopped;
-                    println!(
-                        "\n[{}]+  {:<25}{}",
-                        jobs[job_index].id,
-                        "Stopped",
-                        jobs[job_index].command
-                    );
-                } else if libc::WIFSIGNALED(status) {
-                    // Job was killed by signal
-                    let _sig = libc::WTERMSIG(status);
-                    jobs.remove(job_index);
-                }
-            },
+            }
+            
             _ => {
                 let c_cmd = CString::new(cmd).unwrap();
                 let c_args: Vec<CString> = parts
