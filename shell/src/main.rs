@@ -16,6 +16,7 @@ use std::env::*;
 use std::ffi::CString;
 use std::io::*;
 use crate::cmd::kill::Kill;
+use crate::cmd::jobs::Jobs;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[allow(dead_code)]
@@ -270,64 +271,8 @@ struct Job {
             "help" => print_help(),
 
             "jobs" => {
-                let (mut p_flag, mut l_flag, mut r_flag, mut s_flag) = (false, false, false, false);
-                let mut jobspec: Option<usize> = None;
-                let mut bad_arg: Option<&str> = None;
-
-                // Single pass: validate and classify every argument
-                'parse: for arg in &args {
-                    match arg.as_str() {
-                        "-p" => p_flag = true,
-                        "-l" => l_flag = true,
-                        "-r" => r_flag = true,
-                        "-s" => s_flag = true,
-                        _ => match arg.strip_prefix('%').and_then(|s| s.parse::<usize>().ok()) {
-                            Some(n) => jobspec = Some(n),
-                            None    => { bad_arg = Some(arg); break 'parse; }
-                        }
-                    }
-                }
-
-                if let Some(bad) = bad_arg {
-                    eprintln!("jobs: {bad}: invalid option");
-                    eprintln!("jobs: usage: jobs [-lprs] [%job_number]");
-                    continue;
-                }
-
-                if let Some(n) = jobspec {
-                    if !jobs.iter().any(|j| j.id == n) {
-                        eprintln!("jobs: %{n}: no such job");
-                        continue;
-                    }
-                }
-
-                let jobs_len = jobs.len();
-                for (idx, job) in jobs.iter().enumerate() {
-                    if jobspec.is_some_and(|n| job.id != n)      { continue; }
-                    if r_flag && job.status != JobStatus::Running { continue; }
-                    if s_flag && job.status != JobStatus::Stopped { continue; }
-
-                    let indicator = match idx + 1 {
-                        i if i == jobs_len     => "+",
-                        i if i == jobs_len - 1 => "-",
-                        _                      => " ",
-                    };
-
-                    if p_flag {
-                        println!("{}", job.pid);
-                        continue;
-                    }
-
-                    let status = match job.status {
-                        JobStatus::Running => "Running",
-                        JobStatus::Stopped => "Stopped",
-                    };
-
-                    if l_flag {
-                        println!("[{}]{}  {} {:<20}{}", job.id, indicator, job.pid, status, job.command);
-                    } else {
-                        println!("[{}]{}  {:<22}{}", job.id, indicator, status, job.command);
-                    }
+                if let Err(e) = Jobs::new(args.clone(), &jobs).execute() {
+                    eprintln!("{e}");
                 }
             }
 

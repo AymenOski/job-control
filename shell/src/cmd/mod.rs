@@ -6,6 +6,7 @@ pub mod ls;
 pub mod cat;
 pub mod help;
 pub mod kill;
+pub mod jobs;
 
 
 pub trait Command {
