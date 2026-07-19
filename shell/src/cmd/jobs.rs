@@ -59,6 +59,7 @@ impl<'a> Jobs<'a> {
             let status = match job.status {
                 JobStatus::Running => "Running",
                 JobStatus::Stopped => "Stopped",
+                JobStatus::DonePending => "Done",
             };
 
             if l_flag {

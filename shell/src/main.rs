@@ -23,7 +23,7 @@ use std::io::*;
 enum JobStatus {
     Running,
     Stopped,
-    // we need to add more states like suspended and terminated (ctr +z && ctr +c)
+    DonePending,
 }
 
 #[derive(Clone, Debug)]
@@ -57,6 +57,7 @@ fn main() {
     let mut jobs: Vec<Job> = Vec::new();
 
     loop {
+
         // safe current directory for prompt
         let cwd = match current_dir() {
             Ok(dir) => {
@@ -88,6 +89,47 @@ fn main() {
                 break;
             }
         };
+
+
+        // Cleanup finished background processes (reaping zombies)
+        unsafe {
+            let mut status = 0;
+            loop {
+                // WNOHANG ensures we don't freeze the shell
+                let reaped_pid = libc::waitpid(-1, &mut status, libc::WNOHANG | libc::WUNTRACED);
+                if reaped_pid <= 0 {
+                    break;
+                }
+
+                if let Some(pos) = jobs.iter_mut().position(|j| j.pid == reaped_pid) {
+                    if libc::WIFEXITED(status) || libc::WIFSIGNALED(status) {
+                        // It died! Mark it as DonePending instead of deleting it silently.
+                        jobs[pos].status = JobStatus::DonePending;
+                    } else if libc::WIFSTOPPED(status) {
+                        jobs[pos].status = JobStatus::Stopped;
+                        // Print stopped status immediately on a new line
+                        println!(
+                            "\n[{}]+  Stopped                 {}",
+                            jobs[pos].id, jobs[pos].command
+                        );
+                    }
+                }
+            }
+        }
+
+        let mut i = 0;
+        while i < jobs.len() {
+            if jobs[i].status == JobStatus::DonePending {
+                // Print cleanly on its own fresh line before the prompt renders
+                println!(
+                    "[{}]+  Done                    {}",
+                    jobs[i].id, jobs[i].command
+                );
+                jobs.remove(i);
+            } else {
+                i += 1;
+            }
+        }
 
         let input = input.trim();
         if input.is_empty() {
@@ -293,35 +335,6 @@ fn main() {
                         }
                     } else {
                         eprintln!("fork failed");
-                    }
-                }
-            }
-        }
-
-        // Cleanup finished background processes (reaping zombies)
-        unsafe {
-            let mut status = 0;
-            loop {
-                let reaped_pid = libc::waitpid(-1, &mut status, libc::WNOHANG); // dont wait for the child process to finish
-                if reaped_pid <= 0 {
-                    break;
-                }
-
-                if let Some(pos) = jobs.iter_mut().position(|j| j.pid == reaped_pid) {
-                    if libc::WIFEXITED(status) || libc::WIFSIGNALED(status) {
-                        // If the job was terminated by a signal (like your kill builtin audit)
-                        if libc::WIFSIGNALED(status) {
-                            println!(
-                                "[{}]-  Terminated              {}",
-                                jobs[pos].id, jobs[pos].command
-                            );
-                        }
-                    } else if libc::WIFSTOPPED(status) {
-                        jobs[pos].status = JobStatus::Stopped;
-                        println!(
-                            "[{}]-  Stopped                 {}",
-                            jobs[pos].id, jobs[pos].command
-                        );
                     }
                 }
             }
