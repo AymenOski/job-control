@@ -1,24 +1,22 @@
-
-
 mod cmd;
 mod error;
-use cmd::cp::Cp;
+use crate::cmd::bg::Bg;
+use crate::cmd::fg::Fg;
+use crate::cmd::jobs::Jobs;
+use crate::cmd::kill::Kill;
 use cmd::cat::Cat;
+use cmd::cp::Cp;
+use cmd::help::*;
+use cmd::ls::LsCommand;
 use cmd::mkdir::Mkdir;
 use cmd::mv::Mv;
 use cmd::rm::Rm;
-use cmd::help::*;
-use cmd::ls::LsCommand;
 use cmd::Command;
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 use std::env::*;
 use std::ffi::CString;
 use std::io::*;
-use crate::cmd::kill::Kill;
-use crate::cmd::jobs::Jobs;
-use crate::cmd::bg::Bg;
-use crate::cmd::fg::Fg;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[allow(dead_code)]
@@ -36,7 +34,7 @@ struct Job {
     status: JobStatus, // Exited || Crashed || Stopped by Ctrl+Z
 }
 
-    fn main() {
+fn main() {
     unsafe {
         // Shell puts itself in its own process group
         // libc::setpgid(0, 0); // pid=0 means self, pgid=0 means use pid as pgid
@@ -48,9 +46,9 @@ struct Job {
         libc::signal(libc::SIGTTIN, libc::SIG_IGN);
 
         if libc::isatty(libc::STDIN_FILENO) != 0 {
-        let shell_pid = libc::getpid();
-        libc::setpgid(shell_pid, shell_pid);
-        libc::tcsetpgrp(libc::STDIN_FILENO, shell_pid);
+            let shell_pid = libc::getpid();
+            libc::setpgid(shell_pid, shell_pid);
+            libc::tcsetpgrp(libc::STDIN_FILENO, shell_pid);
         }
     }
 
@@ -68,17 +66,15 @@ struct Job {
             Err(_) => last_dir.clone(),
         };
 
-        let display_dir = cwd.to_string_lossy().replace(&var("HOME").unwrap_or_default(), "~");
+        let display_dir = cwd
+            .to_string_lossy()
+            .replace(&var("HOME").unwrap_or_default(), "~");
 
         // read command line
-        let input = match
-            rl.readline(
-                &format!(
-                    "\x1b[32m127.0.0.1@z01:\x1b[0m{}$ ",
-                    format!("\x1b[34m{}\x1b[0m", display_dir)
-                )
-            )
-        {
+        let input = match rl.readline(&format!(
+            "\x1b[32m127.0.0.1@z01:\x1b[0m{}$ ",
+            format!("\x1b[34m{}\x1b[0m", display_dir)
+        )) {
             Ok(line) => line,
             Err(ReadlineError::Interrupted) => {
                 continue;
@@ -120,10 +116,7 @@ struct Job {
         }
 
         let cmd = parts[0].trim_matches(|c| c == '"');
-        let args: Vec<String> = parts[1..]
-            .iter()
-            .map(|c| c.to_string())
-            .collect();
+        let args: Vec<String> = parts[1..].iter().map(|c| c.to_string()).collect();
 
         match cmd {
             "exit" => {
@@ -133,16 +126,15 @@ struct Job {
             "echo" => {
                 let output: Vec<String> = args
                     .iter()
-                    .map(|s| { s.trim_matches(|c| c == '"' || c == '\'').to_string() })
+                    .map(|s| s.trim_matches(|c| c == '"' || c == '\'').to_string())
                     .collect();
                 println!("{}", output.join(" "));
             }
 
-            "pwd" =>
-                match current_dir() {
-                    Ok(dir) => println!("{}", dir.display()),
-                    Err(_) => println!("pwd: current directory not found"),
-                }
+            "pwd" => match current_dir() {
+                Ok(dir) => println!("{}", dir.display()),
+                Err(_) => println!("pwd: current directory not found"),
+            },
 
             "cat" => {
                 if let Err(e) = Cat::new(args.clone()).execute(&mut rl) {
@@ -227,18 +219,14 @@ struct Job {
                     eprintln!("{:?}", e);
                 }
             }
-            
+
             _ => {
                 let c_cmd = CString::new(cmd).unwrap();
-                let c_args: Vec<CString> = parts
-                    .iter()
-                    .map(|&s| CString::new(s).unwrap())
-                    .collect();
+                let c_args: Vec<CString> =
+                    parts.iter().map(|&s| CString::new(s).unwrap()).collect();
 
-                let mut arg_ptrs: Vec<*const libc::c_char> = c_args
-                    .iter()
-                    .map(|s| s.as_ptr())
-                    .collect();
+                let mut arg_ptrs: Vec<*const libc::c_char> =
+                    c_args.iter().map(|s| s.as_ptr()).collect();
                 arg_ptrs.push(std::ptr::null());
 
                 unsafe {
@@ -260,7 +248,8 @@ struct Job {
                         libc::setpgid(pid, pid);
 
                         if is_background {
-                            let fresh_id = (1..).find(|id| !jobs.iter().any(|j| j.id == *id)).unwrap();
+                            let fresh_id =
+                                (1..).find(|id| !jobs.iter().any(|j| j.id == *id)).unwrap();
                             // Background: add to jobs, continue shell
                             let job = Job {
                                 id: fresh_id,
@@ -287,11 +276,11 @@ struct Job {
                             // Check what happened to the child process
                             if libc::WIFEXITED(status) {
                                 // Child exited normally - just continue
-                                
                             } else if libc::WIFSTOPPED(status) {
                                 // Child was stopped by Ctrl+Z - add to jobs table
 
-                                let fresh_id = (1..).find(|id| !jobs.iter().any(|j| j.id == *id)).unwrap();
+                                let fresh_id =
+                                    (1..).find(|id| !jobs.iter().any(|j| j.id == *id)).unwrap();
                                 let job = Job {
                                     id: fresh_id,
                                     pid,
@@ -318,8 +307,22 @@ struct Job {
                     break;
                 }
 
-                if let Some(pos) = jobs.iter().position(|j| j.pid == reaped_pid) {
-                    jobs.remove(pos);
+                if let Some(pos) = jobs.iter_mut().position(|j| j.pid == reaped_pid) {
+                    if libc::WIFEXITED(status) || libc::WIFSIGNALED(status) {
+                        // If the job was terminated by a signal (like your kill builtin audit)
+                        if libc::WIFSIGNALED(status) {
+                            println!(
+                                "[{}]-  Terminated              {}",
+                                jobs[pos].id, jobs[pos].command
+                            );
+                        }
+                    } else if libc::WIFSTOPPED(status) {
+                        jobs[pos].status = JobStatus::Stopped;
+                        println!(
+                            "[{}]-  Stopped                 {}",
+                            jobs[pos].id, jobs[pos].command
+                        );
+                    }
                 }
             }
         }
