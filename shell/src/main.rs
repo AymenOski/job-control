@@ -309,7 +309,7 @@ fn main() {
 
                             // Wait for child (WUNTRACED so we know if it stops)
                             let mut status = 0;
-                            libc::waitpid(pid, &mut status, libc::WUNTRACED);
+                            libc::waitpid(pid, &mut status, libc::WUNTRACED); // no WNOHANG here, bcs we want to block the parent until the child is done or stopped
 
                             let shell_pgid = libc::getpgrp();
 
