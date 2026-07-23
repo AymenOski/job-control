@@ -18,21 +18,23 @@ impl<'a> Kill<'a> {
     }
 
     fn parse_signal(arg: &str) -> Result<i32, String> {
-        // Solo '-' is invalid — must have a signal number after it
+        // Solo '-' is invalid — must have a signal specifier after it
         if arg.len() == 1 {
             return Err("kill: : invalid signal specification".to_string());
         }
 
-        // Parse the numeric signal value after the '-' prefix
-        match arg[1..].parse::<i32>() {
-            Ok(n) => Ok(n),
-            Err(_) => {
-                let invalid_part = &arg[1..];
-                Err(format!(
+        let spec = &arg[1..].to_uppercase();
+
+        match spec.as_str().to_ascii_uppercase().as_str() {
+            "9" | "KILL" | "SIGKILL" => Ok(libc::SIGKILL),
+            "15" | "TERM" | "SIGTERM" => Ok(libc::SIGTERM),
+            _ => match arg[1..].parse::<i32>() {
+                Ok(n) => Ok(n),
+                Err(_) => Err(format!(
                     "kill: {}: invalid signal specification",
-                    invalid_part
-                ))
-            }
+                    &arg[1..]
+                )),
+            },
         }
     }
 
@@ -44,7 +46,7 @@ impl<'a> Kill<'a> {
     pub fn execute(&mut self) -> Result<(), ShellError> {
         // Display usage message if no arguments provided
         if self.args.is_empty() {
-            eprintln!("kill: usage: kill [-signal] pid");
+            eprintln!("kill: usage: kill [-signal | -SIGTERM | -SIGKILL] pid");
             return Ok(());
         }
 
