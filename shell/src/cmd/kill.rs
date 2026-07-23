@@ -11,7 +11,6 @@ pub struct Kill<'a> {
 }
 
 impl<'a> Kill<'a> {
-
     // * `args` - Command-line arguments (e.g., "-9", "1234", "%1")
     // * `jobs` - Mutable reference to session's job list for lookup and cleanup
     pub fn new(args: Vec<String>, jobs: &'a mut Vec<Job>) -> Self {
@@ -19,22 +18,28 @@ impl<'a> Kill<'a> {
     }
 
     fn parse_signal(arg: &str) -> Result<i32, String> {
-        // If arg doesn't start with '-' or is just '-', default to SIGTERM
+        // Solo '-' is invalid — must have a signal number after it
         if arg.len() == 1 {
-            return Ok(libc::SIGTERM);
+            return Err("kill: : invalid signal specification".to_string());
         }
 
         // Parse the numeric signal value after the '-' prefix
-        arg[1..]
-            .parse::<i32>()
-            .map_err(|_| format!("kill: invalid signal '{}'", arg))
+        match arg[1..].parse::<i32>() {
+            Ok(n) => Ok(n),
+            Err(_) => {
+                let invalid_part = &arg[1..];
+                Err(format!(
+                    "kill: {}: invalid signal specification",
+                    invalid_part
+                ))
+            }
+        }
     }
 
     fn parse_pid(arg: &str) -> Result<libc::pid_t, String> {
         arg.parse::<libc::pid_t>()
             .map_err(|_| format!("kill: invalid pid '{}'", arg))
     }
-
 
     pub fn execute(&mut self) -> Result<(), ShellError> {
         // Display usage message if no arguments provided
@@ -97,7 +102,6 @@ impl<'a> Kill<'a> {
                 }
             }
         };
-
         unsafe {
             // Send the signal to the target process via the kill() system call
             if libc::kill(pid, signal) == -1 {
@@ -111,7 +115,14 @@ impl<'a> Kill<'a> {
                     let job = &self.jobs[pos];
                     // Determine job indicator (+ for current, - for previous)
                     let indicator = if pos == self.jobs.len() - 1 { "+" } else { "-" };
-                    println!("[{}]{}  Terminated              {}", job.id, indicator, job.command);
+
+                    // Display status based on signal type
+                    let status = match signal {
+                        libc::SIGKILL => "Killed",
+                        libc::SIGTERM => "Terminated",
+                        _ => "Terminated",
+                    };
+                    println!("[{}]{}  {:<24}{}", job.id, indicator, status, job.command);
 
                     // Remove the job from the list
                     self.jobs.remove(pos);
